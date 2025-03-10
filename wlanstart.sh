@@ -88,16 +88,22 @@ iptables -A FORWARD -i ${INTERFACE} -j DROP
 
 echo "Configuring DHCP server .."
 
-cat > "/etc/dhcp/dhcpd.conf" <<EOF
-option subnet-mask 255.255.255.0;
-option routers ${AP_ADDR};
-subnet ${SUBNET} netmask 255.255.255.0 {
-  range ${SUBNET::-1}100 ${SUBNET::-1}200;
-}
+# Create required directories
+mkdir -p /var/lib/misc
+touch /var/lib/misc/udhcpd.leases
+
+# Configure udhcpd
+cat > "/etc/udhcpd.conf" <<EOF
+interface ${INTERFACE}
+start ${SUBNET::-1}100
+end ${SUBNET::-1}200
+option subnet 255.255.255.0
+option router ${AP_ADDR}
+lease_file /var/lib/misc/udhcpd.leases
 EOF
 
 echo "Starting DHCP server .."
-dhcpd ${INTERFACE}
+udhcpd -f /etc/udhcpd.conf &
 
 echo "Starting HostAP daemon ..."
 /usr/sbin/hostapd /etc/hostapd.conf
