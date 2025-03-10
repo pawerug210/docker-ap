@@ -69,48 +69,26 @@ ip addr flush dev ${INTERFACE}
 ip addr add ${AP_ADDR}/24 dev ${INTERFACE}
 
 # NAT settings
-echo "NAT settings ip_dynaddr, ip_forward"
+echo "Setting up traffic redirection..."
 
-for i in ip_dynaddr ip_forward ; do 
-  if [ $(cat /proc/sys/net/ipv4/$i) ]; then
-    echo $i already 1 
-  else
-    echo "1" > /proc/sys/net/ipv4/$i
-  fi
-done
+# Clear existing rules
+iptables -t nat -F
+iptables -F FORWARD
 
-cat /proc/sys/net/ipv4/ip_dynaddr 
-cat /proc/sys/net/ipv4/ip_forward
+# Redirect all DNS queries to our AP address
+iptables -t nat -A PREROUTING -i ${INTERFACE} -p udp --dport 53 -j DNAT --to ${AP_ADDR}
+iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 53 -j DNAT --to ${AP_ADDR}
 
-if [ "${OUTGOINGS}" ] ; then
-   ints="$(sed 's/,\+/ /g' <<<"${OUTGOINGS}")"
-   for int in ${ints}
-   do
-      echo "Setting iptables for outgoing traffics on ${int}..."
-      iptables -t nat -D POSTROUTING -s ${SUBNET}/24 -o ${int} -j MASQUERADE > /dev/null 2>&1 || true
-      iptables -t nat -A POSTROUTING -s ${SUBNET}/24 -o ${int} -j MASQUERADE
+# Redirect all HTTP/HTTPS traffic to localhost:8000
+iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 80 -j DNAT --to ${AP_ADDR}:8000
+iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 443 -j DNAT --to ${AP_ADDR}:8000
 
-      iptables -D FORWARD -i ${int} -o ${INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT > /dev/null 2>&1 || true
-      iptables -A FORWARD -i ${int} -o ${INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT
+# Block all other outgoing traffic
+iptables -A FORWARD -i ${INTERFACE} -j DROP
 
-      iptables -D FORWARD -i ${INTERFACE} -o ${int} -j ACCEPT > /dev/null 2>&1 || true
-      iptables -A FORWARD -i ${INTERFACE} -o ${int} -j ACCEPT
-   done
-else
-   echo "Setting iptables for outgoing traffics on all interfaces..."
-   iptables -t nat -D POSTROUTING -s ${SUBNET}/24 -j MASQUERADE > /dev/null 2>&1 || true
-   iptables -t nat -A POSTROUTING -s ${SUBNET}/24 -j MASQUERADE
-
-   iptables -D FORWARD -o ${INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT > /dev/null 2>&1 || true
-   iptables -A FORWARD -o ${INTERFACE} -m state --state RELATED,ESTABLISHED -j ACCEPT
-
-   iptables -D FORWARD -i ${INTERFACE} -j ACCEPT > /dev/null 2>&1 || true
-   iptables -A FORWARD -i ${INTERFACE} -j ACCEPT
-fi
 echo "Configuring DHCP server .."
 
 cat > "/etc/dhcp/dhcpd.conf" <<EOF
-option domain-name-servers 8.8.8.8, 8.8.4.4;
 option subnet-mask 255.255.255.0;
 option routers ${AP_ADDR};
 subnet ${SUBNET} netmask 255.255.255.0 {
@@ -122,5 +100,5 @@ echo "Starting DHCP server .."
 dhcpd ${INTERFACE}
 
 echo "Starting HostAP daemon ..."
-/usr/sbin/hostapd /etc/hostapd.conf 
+/usr/sbin/hostapd /etc/hostapd.conf
 
