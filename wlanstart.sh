@@ -63,28 +63,10 @@ rfkill unblock wlan
 
 echo "Setting interface ${INTERFACE}"
 
-# Setup interface and restart DHCP service 
+# Setup interface
 ip link set ${INTERFACE} up
 ip addr flush dev ${INTERFACE}
 ip addr add ${AP_ADDR}/24 dev ${INTERFACE}
-
-# Configure dnsmasq for DNS spoofing
-cat > "/etc/dnsmasq.conf" <<EOF
-interface=${INTERFACE}
-listen-address=${AP_ADDR}
-bind-interfaces
-no-resolv
-no-poll
-no-hosts
-address=/#/${AP_ADDR}
-dhcp-range=${SUBNET::-1}100,${SUBNET::-1}200,12h
-dhcp-option=option:router,${AP_ADDR}
-dhcp-option=option:dns-server,${AP_ADDR}
-EOF
-
-# Start dnsmasq
-killall dnsmasq 2>/dev/null || true
-dnsmasq
 
 # NAT settings
 echo "Setting up traffic redirection..."
@@ -93,18 +75,39 @@ echo "Setting up traffic redirection..."
 iptables -t nat -F
 iptables -F FORWARD
 
-# Force DNS traffic to our dnsmasq
-iptables -t nat -A PREROUTING -i ${INTERFACE} -p udp --dport 53 -j DNAT --to ${AP_ADDR}:53
-iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 53 -j DNAT --to ${AP_ADDR}:53
+# Redirect all DNS queries to AP
+iptables -t nat -A PREROUTING -i ${INTERFACE} -p udp --dport 53 -j DNAT --to ${AP_ADDR}
+iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 53 -j DNAT --to ${AP_ADDR}
 
-# HTTP/HTTPS redirection
+# Redirect web traffic to port 8000
 iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 80 -j DNAT --to ${AP_ADDR}:8000
 iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 443 -j DNAT --to ${AP_ADDR}:8000
 
-# Enable NAT
+# Enable NAT for return traffic
 iptables -t nat -A POSTROUTING -j MASQUERADE
-iptables -A FORWARD -i ${INTERFACE} -j ACCEPT
 
-# Block all other outgoing traffic
-iptables -A FORWARD -j DROP
+echo "Configuring DHCP server .."
+
+# Setup DHCP
+mkdir -p /var/lib/misc
+touch /var/lib/misc/udhcpd.leases
+
+cat > "/etc/udhcpd.conf" <<EOF
+interface ${INTERFACE}
+start ${SUBNET::-1}100
+end ${SUBNET::-1}200
+option subnet 255.255.255.0
+option router ${AP_ADDR}
+option dns ${AP_ADDR}
+lease_file /var/lib/misc/udhcpd.leases
+auto_time 0
+decline_time 0
+conflict_time 0
+EOF
+
+echo "Starting DHCP server .."
+udhcpd -f /etc/udhcpd.conf &
+
+echo "Starting HostAP daemon ..."
+/usr/sbin/hostapd /etc/hostapd.conf
 
