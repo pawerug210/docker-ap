@@ -68,6 +68,17 @@ ip link set ${INTERFACE} up
 ip addr flush dev ${INTERFACE}
 ip addr add ${AP_ADDR}/24 dev ${INTERFACE}
 
+# Configure dnsmasq to respond with our AP address for all queries
+cat > "/etc/dnsmasq.conf" <<EOF
+interface=${INTERFACE}
+listen-address=${AP_ADDR}
+bind-interfaces
+address=/#/${AP_ADDR}
+EOF
+
+# Start dnsmasq
+dnsmasq
+
 # NAT settings
 echo "Setting up traffic redirection..."
 
