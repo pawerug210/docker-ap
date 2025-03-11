@@ -75,16 +75,20 @@ echo "Setting up traffic redirection..."
 iptables -t nat -F
 iptables -F FORWARD
 
-# Redirect all DNS queries to our AP address
+# DNS redirection - force all DNS queries to be handled by our AP
 iptables -t nat -A PREROUTING -i ${INTERFACE} -p udp --dport 53 -j DNAT --to ${AP_ADDR}
 iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 53 -j DNAT --to ${AP_ADDR}
 
-# Redirect all HTTP/HTTPS traffic to localhost:8000
+# HTTP/HTTPS redirection - capture all web traffic
 iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 80 -j DNAT --to ${AP_ADDR}:8000
 iptables -t nat -A PREROUTING -i ${INTERFACE} -p tcp --dport 443 -j DNAT --to ${AP_ADDR}:8000
 
+# We need these rules for DNS and HTTP redirections to work properly
+iptables -t nat -A POSTROUTING -j MASQUERADE
+iptables -A FORWARD -i ${INTERFACE} -j ACCEPT
+
 # Block all other outgoing traffic
-iptables -A FORWARD -i ${INTERFACE} -j DROP
+iptables -A FORWARD -j DROP
 
 echo "Configuring DHCP server .."
 
